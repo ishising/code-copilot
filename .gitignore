@@ -1,0 +1,21 @@
+# Credentials. Never committed — this repository is public.
+.env
+.env.local
+*.p12
+*.pem
+
+# Node
+node_modules/
+dist/
+
+# Swift
+.build/
+build/
+*.xcodeproj/
+.swiftpm/
+
+# macOS
+.DS_Store
+
+# Local editor/agent config
+.claude/

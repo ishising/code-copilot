@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- Which Cosmo backend this page talks to. A browser has no process
+         environment, so the SDK reads the backend from this tag and from
+         nowhere else. Vite substitutes the value from .env at build time, so
+         switching hosts is a config change rather than a code edit.
+
+         This matters more than it looks: app.askcosmo.ai and
+         platform.askcosmo.ai are separate installations with separate
+         workspaces, and a key from one is rejected by the other with a 401
+         that reads like a bad key rather than a wrong address. -->
+    <meta name="cosmo-base-url" content="%VITE_COSMO_BASE_URL%" />
+    <title>Code Copilot</title>
+    <link rel="stylesheet" href="/src/styles.css" />
+  </head>
+  <body>
+    <div id="setup">
+      <div class="card">
+        <h1>Code Copilot</h1>
+        <p>
+          Paste a GitHub repository. It reads the whole thing, then walks you
+          through it &mdash; out loud, pointing at what it means.
+        </p>
+        <form id="setup-form">
+          <input
+            id="repo-input"
+            type="text"
+            placeholder="github.com/owner/repo"
+            autocomplete="off"
+            spellcheck="false"
+          />
+          <button id="ingest" type="submit">Read this repo</button>
+        </form>
+        <p id="setup-status" class="hint"></p>
+      </div>
+    </div>
+
+    <main id="app" hidden>
+      <header id="bar">
+        <span id="repo-name"></span>
+        <span id="status" class="idle">reading</span>
+        <button id="end" type="button" hidden>End session</button>
+      </header>
+
+      <nav id="tree" aria-label="Files"></nav>
+
+      <section id="code-pane">
+        <div id="crumb">Pick a file, or just start talking</div>
+        <div id="code"></div>
+      </section>
+
+      <aside id="side">
+        <div id="transcript"></div>
+      </aside>
+    </main>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
