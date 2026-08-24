@@ -24,6 +24,28 @@ out loud — pointing at exactly what it means while it talks.
 
 Built on the [Cosmo SDK](https://github.com/socratic-ai/cosmo-ai).
 
+## Authentication
+
+**You probably need no token.** If you have run `gh auth login`, the dev
+server borrows the CLI's credential automatically. That is an OAuth token
+rather than a personal access token, so it reaches organisations that reject a
+PAT on policy — measured: a fine-grained token was refused by the
+`socratic-ai` org for exceeding a 366-day lifetime, while this one reads the
+same private repository fine.
+
+Dev only. A production build never bakes a personal credential into a bundle.
+An explicit `VITE_GITHUB_TOKEN` still overrides it.
+
+## Monorepos
+
+Paste the URL of the folder you care about, not the repository root:
+
+```
+https://github.com/socratic-ai/cosmo/tree/main/sdks/cosmo-realtime
+```
+
+On that repository that is the difference between 17,350 files and 1,019.
+
 ## Setup, once
 
 1. A Cosmo API key with the `realtime:use` scope — in the Cosmo web app at

@@ -12,7 +12,15 @@ const API = 'https://api.github.com';
  *  control characters. Its presence is the cheap binary-file test. */
 const NUL = String.fromCharCode(0);
 
-export type RepoRef = { owner: string; repo: string };
+export type RepoRef = {
+  owner: string;
+  repo: string;
+  /** Folder to confine the walk to, from a `/tree/<branch>/<path>` URL. A
+   *  monorepo is otherwise unusable: `socratic-ai/cosmo` holds over seventeen
+   *  thousand files, and a brief built from all of them describes everything
+   *  and explains nothing. */
+  subpath?: string;
+};
 
 export type TreeEntry = {
   path: string;
@@ -37,7 +45,14 @@ export function parseRepoRef(input: string): RepoRef | null {
   const trimmed = input.trim().replace(/\.git$/, '').replace(/\/+$/, '');
   const url = trimmed.match(/github\.com[/:]([^/]+)\/([^/]+)/);
   if (url !== null && url[1] !== undefined && url[2] !== undefined) {
-    return { owner: url[1], repo: url[2] };
+    // Anything after `/tree/<branch>/` is the folder being pointed at.
+    // `/blob/` is excluded on purpose: it addresses one file, and confining
+    // the whole walk to a single file leaves nothing to walk.
+    const folder = trimmed.match(/\/tree\/[^/]+\/(.+)$/);
+    const subpath = folder?.[1];
+    return subpath === undefined
+      ? { owner: url[1], repo: url[2] }
+      : { owner: url[1], repo: url[2], subpath };
   }
   const bare = trimmed.match(/^([\w.-]+)\/([\w.-]+)$/);
   if (bare !== null && bare[1] !== undefined && bare[2] !== undefined) {
@@ -80,9 +95,20 @@ async function api<T>(path: string): Promise<T> {
   const response = await fetch(`${API}${path}`, { method: 'GET', headers: headers() });
   if (!response.ok) {
     if (response.status === 404) {
+      // Naming the path matters: a 404 is as often a URL this app built
+      // wrongly as a repository that isn't there, and a message that only
+      // ever blames the address sends you checking the address.
+      const hasToken =
+        typeof import.meta.env.VITE_GITHUB_TOKEN === 'string' &&
+        import.meta.env.VITE_GITHUB_TOKEN !== '';
       throw new Error(
-        "I can't find that repository — check the address, and note that " +
-          'a private repository needs a GitHub token in .env.',
+        `GitHub returned 404 for ${path}. ` +
+          (hasToken
+            ? "A token is configured, so either the repository doesn't exist or " +
+              'the token has no access to it.'
+            : 'No GitHub token is configured, which a private repository needs. ' +
+              'Signing in with `gh auth login` is enough — the dev server picks ' +
+              'that up automatically.'),
       );
     }
     // A 403 is only a rate limit when the budget is actually spent. It is
@@ -120,13 +146,20 @@ export async function fetchSnapshot(ref: RepoRef): Promise<RepoSnapshot> {
     truncated: boolean;
   }>(`/repos/${ref.owner}/${ref.repo}/git/trees/${meta.default_branch}?recursive=1`);
 
-  const entries: TreeEntry[] = tree.tree
+  let entries: TreeEntry[] = tree.tree
     .filter((item) => item.type === 'blob' || item.type === 'tree')
     .map((item) => ({
       path: item.path,
-      type: item.type === 'tree' ? 'tree' : 'blob',
+      type: item.type === 'tree' ? ('tree' as const) : ('blob' as const),
       size: item.size ?? 0,
     }));
+
+  if (ref.subpath !== undefined) {
+    const prefix = ref.subpath.endsWith('/') ? ref.subpath : `${ref.subpath}/`;
+    entries = entries.filter(
+      (entry) => entry.path === ref.subpath || entry.path.startsWith(prefix),
+    );
+  }
 
   let readme: string | null = null;
   try {
