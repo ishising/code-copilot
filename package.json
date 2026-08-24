@@ -1,0 +1,13 @@
+{
+  "name": "code-copilot",
+  "private": true,
+  "description": "Two voice copilots that walk you through a codebase. This root file only forwards to the two apps.",
+  "scripts": {
+    "dev": "npm --prefix web run dev",
+    "build": "npm --prefix web run build",
+    "typecheck": "npm --prefix web run typecheck",
+    "install:web": "npm --prefix web install",
+    "mac": "./mac/run.sh",
+    "mac:test": "swift test --package-path mac"
+  }
+}

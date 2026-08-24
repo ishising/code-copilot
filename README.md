@@ -43,6 +43,19 @@ in a screenshot of a code listing. The native app grounds against the
 accessibility tree instead, which *says* where every row is rather than
 guessing from pixels.
 
+## Running either app
+
+From the repository root:
+
+```bash
+npm run dev      # the web app  (forwards to web/)
+npm run mac      # build and launch the Mac app
+npm run mac:test # the Mac app's tests
+```
+
+The root `package.json` holds nothing but those forwarders — each app keeps
+its own dependencies.
+
 ## Getting started
 
 Each app has its own README with setup. Credentials are shared: both read

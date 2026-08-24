@@ -39,9 +39,29 @@ there, so the user does the acting."
    `cosmo login` also works as a fallback for the Cosmo key. The panel shows
    where each credential came from — hover for the exact path.
 
-   The GitHub token wants to be **fine-grained** with Contents: Read-only. Two
-   traps: a classic token's `public_repo` scope grants **write**, and many orgs
-   reject fine-grained tokens whose lifetime exceeds 366 days.
+   **You may not need a GitHub token at all.** If `gh auth login` has been run,
+   this app borrows the CLI's credential automatically — and because that is an
+   OAuth token rather than a personal access token, it reaches organisations
+   whose policies reject a PAT outright. Measured: a fine-grained token was
+   refused by the `socratic-ai` org for exceeding a 366-day lifetime, while
+   `gh`'s token read the same private repository fine.
+
+   If you do configure one, it wants to be **fine-grained** with Contents:
+   Read-only. Two traps: a classic token's `public_repo` scope grants **write**,
+   and many orgs reject long-lived fine-grained tokens. An explicit
+   `VITE_GITHUB_TOKEN` in the environment still overrides the CLI.
+
+## Monorepos
+
+Paste the URL of the folder you care about, not the repository root:
+
+```
+https://github.com/socratic-ai/cosmo/tree/main/sdks/cosmo-realtime
+```
+
+The walk is confined to that folder. On that repository it is the difference
+between 17,350 files and 1,019 — a brief built from the whole thing describes
+everything and explains nothing.
 
 2. **A stable signing identity** — run this once:
 

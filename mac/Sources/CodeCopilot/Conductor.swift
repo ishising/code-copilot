@@ -128,6 +128,12 @@ public final class Conductor {
         let agent = try client.agent(
             instructions: Persona.instructions(brief: brief),
             voice: VoiceConfig(name: Persona.voice),
+            // Noise cancellation is off unless asked for. Without it the mic
+            // hears the agent's own voice coming out of the speakers, and the
+            // transcriber writes it down as the user — in one session that
+            // surfaced as phantom turns in Spanish and Portuguese, which the
+            // agent then apologised for misunderstanding.
+            audio: AudioConfig(noiseCancellation: true),
             tools: try tools.agentTools(),
             greeting: Persona.greeting
         )

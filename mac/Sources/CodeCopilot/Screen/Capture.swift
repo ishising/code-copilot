@@ -116,27 +116,66 @@ public enum Capture {
         )
     }
 
-    /// Which application the agent is actually looking at.
+    /// Bundle identifiers of browsers, most-preferred first. Named rather
+    /// than sniffed because this app exists to walk a repository on GitHub,
+    /// and the browser showing it is the thing worth looking at.
+    static let browserIDs = [
+        "com.google.Chrome", "com.apple.Safari", "com.microsoft.edgemac",
+        "com.brave.Browser", "company.thebrowser.Browser", "com.vivaldi.Vivaldi",
+    ]
+
+    /// Which application the agent looks at.
     ///
-    /// Not simply `frontmostApplication`: this app has a window of its own,
-    /// and the moment the user clicks the panel — or right after launch — we
-    /// are frontmost. Walking our own accessibility tree finds none of their
-    /// code, so the agent has nothing to point at and silently falls back to
-    /// describing things in words.
+    /// The browser, when one is open — that is where the code being walked
+    /// lives. Among several, the one whose window is nearest the front,
+    /// according to the window server rather than to any guess of ours.
     ///
-    /// So: the frontmost application unless that is us, in which case the most
-    /// recently active other application.
+    /// Two earlier attempts were wrong in instructive ways.
+    /// `frontmostApplication` is this app the moment the user clicks its
+    /// panel. Sorting by `launchDate` picks whatever was opened most recently,
+    /// which is how a session ended up being given a running commentary on
+    /// WhatsApp.
+    ///
+    /// Falls back to the frontmost window that is not ours, so a terminal or
+    /// a dashboard can still be looked at when no browser is running.
     @MainActor
     static func subject() -> NSRunningApplication? {
         let mine = ProcessInfo.processInfo.processIdentifier
-        if let front = NSWorkspace.shared.frontmostApplication,
-            front.processIdentifier != mine
-        {
-            return front
+        let running = NSWorkspace.shared.runningApplications
+
+        // Front-to-back order of real, on-screen windows.
+        let ordered: [pid_t] = {
+            guard
+                let list = CGWindowListCopyWindowInfo(
+                    [.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID)
+                    as? [[String: Any]]
+            else { return [] }
+            var seen = Set<pid_t>()
+            return list.compactMap { window -> pid_t? in
+                guard
+                    let pid = window[kCGWindowOwnerPID as String] as? pid_t,
+                    pid != mine,
+                    (window[kCGWindowLayer as String] as? Int) == 0,
+                    let bounds = window[kCGWindowBounds as String] as? [String: Any],
+                    (bounds["Width"] as? Double ?? 0) > 200,
+                    (bounds["Height"] as? Double ?? 0) > 200,
+                    seen.insert(pid).inserted
+                else { return nil }
+                return pid
+            }
+        }()
+
+        func app(_ pid: pid_t) -> NSRunningApplication? {
+            running.first { $0.processIdentifier == pid }
         }
-        return NSWorkspace.shared.runningApplications
-            .filter { $0.activationPolicy == .regular && $0.processIdentifier != mine }
-            .max(by: { ($0.launchDate ?? .distantPast) < ($1.launchDate ?? .distantPast) })
+
+        if let browser = ordered.lazy.compactMap(app).first(where: {
+            browserIDs.contains($0.bundleIdentifier ?? "")
+        }) {
+            return browser
+        }
+        return ordered.lazy.compactMap(app).first
+            ?? NSWorkspace.shared.frontmostApplication
     }
 
     /// What the last capture saw, for the activity panel. A look that found

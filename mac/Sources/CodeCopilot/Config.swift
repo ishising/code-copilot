@@ -79,8 +79,22 @@ public struct Config: Sendable {
             return nil
         }
 
-        config.githubToken = resolve(
-            ["VITE_GITHUB_TOKEN", "GITHUB_TOKEN"], jsonKey: "githubToken", label: "GitHub token")
+        // The GitHub CLI's token first, when it is signed in. It is an OAuth
+        // credential rather than a personal access token, so it reaches
+        // organisations whose policies reject a PAT — and it needs nothing
+        // created or pasted. An explicit environment variable still wins, for
+        // deliberately scoping a run down.
+        if let explicit = clean(env["VITE_GITHUB_TOKEN"]) ?? clean(env["GITHUB_TOKEN"]) {
+            config.githubToken = explicit
+            config.sources["GitHub token"] = "environment"
+        } else if let cli = GitHubCLI.token() {
+            config.githubToken = cli
+            config.sources["GitHub token"] = "gh CLI (gh auth token)"
+        } else {
+            config.githubToken = resolve(
+                ["VITE_GITHUB_TOKEN", "GITHUB_TOKEN"], jsonKey: "githubToken",
+                label: "GitHub token")
+        }
         config.cosmoAPIKey = resolve(
             ["VITE_COSMO_API_KEY", "COSMO_API_KEY"], jsonKey: "cosmoApiKey", label: "Cosmo key")
         config.cosmoBaseURL = resolve(

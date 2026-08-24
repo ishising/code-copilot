@@ -16,6 +16,11 @@ public enum GitHub {
     public struct Ref: Sendable, Equatable {
         public let owner: String
         public let repo: String
+        /// Folder within the repository to confine the walk to, taken from a
+        /// `/tree/<branch>/<path>` URL. A monorepo is otherwise unusable here:
+        /// `socratic-ai/cosmo` has over seventeen thousand files, and a brief
+        /// built from all of them describes everything and explains nothing.
+        public var subpath: String? = nil
     }
 
     public struct TreeEntry: Sendable {
@@ -48,7 +53,18 @@ public enum GitHub {
 
         if let match = text.range(of: #"github\.com[/:]([^/]+)/([^/]+)"#, options: .regularExpression) {
             let parts = text[match].split(whereSeparator: { $0 == "/" || $0 == ":" })
-            if parts.count >= 3 { return Ref(owner: String(parts[1]), repo: String(parts[2])) }
+            if parts.count >= 3 {
+                // Anything after /tree/<branch>/ is the folder the person is
+                // pointing at. `/blob/` is deliberately excluded: it addresses
+                // a single file, and confining the whole walk to one file
+                // would leave nothing to walk.
+                var subpath: String? = nil
+                if let rest = text.range(of: #"/tree/[^/]+/"#, options: .regularExpression) {
+                    let tail = String(text[rest.upperBound...])
+                    if !tail.isEmpty { subpath = tail }
+                }
+                return Ref(owner: String(parts[1]), repo: String(parts[2]), subpath: subpath)
+            }
         }
         // Anchored, and restricted to the characters GitHub actually allows
         // in a name. A loose split here happily reads `https://example.com` as
@@ -142,12 +158,18 @@ public enum GitHub {
             as: [String: Any].self
         )
         let raw = tree["tree"] as? [[String: Any]] ?? []
-        let entries: [TreeEntry] = raw.compactMap { item in
+        var entries: [TreeEntry] = raw.compactMap { item in
             guard let path = item["path"] as? String,
                 let kind = item["type"] as? String,
                 kind == "blob" || kind == "tree"
             else { return nil }
             return TreeEntry(path: path, isFile: kind == "blob", size: item["size"] as? Int ?? 0)
+        }
+
+        // Confine to the folder the URL pointed at, if it named one.
+        if let subpath = ref.subpath {
+            let prefix = subpath.hasSuffix("/") ? subpath : subpath + "/"
+            entries = entries.filter { $0.path == subpath || $0.path.hasPrefix(prefix) }
         }
 
         // A repo with no README is normal; the brief just says so.

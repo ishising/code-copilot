@@ -23,11 +23,20 @@ struct RefTests {
         }
     }
 
-    @Test("a deep link keeps just the repository")
+    @Test("a link to a single file keeps just the repository")
     func deepLink() {
-        #expect(
-            GitHub.parseRef("https://github.com/socratic-ai/cosmo-ai/blob/main/README.md")
-                == GitHub.Ref(owner: "socratic-ai", repo: "cosmo-ai"))
+        // `/blob/` addresses one file. Scoping the walk to it would leave
+        // nothing to walk, so it is treated as the repository root.
+        let ref = GitHub.parseRef("https://github.com/socratic-ai/cosmo-ai/blob/main/README.md")
+        #expect(ref?.owner == "socratic-ai")
+        #expect(ref?.repo == "cosmo-ai")
+        #expect(ref?.subpath == nil)
+    }
+
+    @Test("a link to a folder scopes the walk to it")
+    func folderLink() {
+        let ref = GitHub.parseRef("https://github.com/socratic-ai/cosmo/tree/main/sdks/cosmo-realtime")
+        #expect(ref?.subpath == "sdks/cosmo-realtime")
     }
 
     @Test("refuses what isn't a repository")
