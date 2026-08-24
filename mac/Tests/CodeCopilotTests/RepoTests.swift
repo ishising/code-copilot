@@ -177,3 +177,43 @@ struct AXFilterTests {
         #expect(out.title == "index.js")
     }
 }
+
+@Suite("Usage example extraction")
+struct UsageTests {
+
+    @Test("a real README yields its usage block, not its install commands")
+    func extractsUsage() throws {
+        let readme = """
+            # Thing
+
+            Install it:
+
+            ```bash
+            npm install thing
+            ```
+
+            Use it:
+
+            ```ts
+            import { Client } from 'thing';
+            const client = new Client({ token: 'x' });
+            const session = await client.start();
+            for await (const event of session) {}
+            ```
+            """
+        let usage = try #require(Brief.usageExample(readme))
+        #expect(usage.contains("import { Client }"))
+        #expect(!usage.contains("npm install"))
+    }
+
+    @Test("a README with only shell blocks yields nothing rather than noise")
+    func skipsShellOnly() {
+        let readme = "# Thing\n\n```bash\nbrew install thing\ncd thing\nnpm i\nnpm run dev\n```"
+        #expect(Brief.usageExample(readme) == nil)
+    }
+
+    @Test("a one-liner is not a usage example")
+    func skipsShortBlocks() {
+        #expect(Brief.usageExample("# T\n\n```ts\nconst x = 1;\n```") == nil)
+    }
+}

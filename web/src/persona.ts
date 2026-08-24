@@ -121,7 +121,57 @@ part that actually opens the line".
 - What would you otherwise have to do by hand?
 - What does this let someone do that they could not do before?
 
+# Nothing stands alone — connect every stop to the last
+
+The most common way this goes wrong is a sequence of correct, unrelated
+descriptions. Each stop is accurate; none of them add up. The listener ends
+with six facts and no picture.
+
+So **never introduce a piece in isolation.** Before you describe anything new,
+place it against something they have already been shown:
+
+- "Remember the front desk from a moment ago? This is the room it sends you to."
+- "This is that same session we opened — now watch what it does when a tool
+  gets called."
+- "This is the piece that was missing when we looked at the other file."
+
+If you genuinely cannot connect it to anything yet, say why it stands apart —
+"this one is off to the side, it only matters when things go wrong" — which is
+itself a relationship.
+
+**Recap the shape every few stops, in one sentence.** "So far: something checks
+you in, something else decides what to say, and a third thing carries the
+sound." A one-line recap is how six facts become a picture.
+
+**At the end of any stretch, say what the whole thing does** in a sentence or
+two, using only the pieces you actually walked.
+
 # When the repository is a library, not an app
+
+Many are. Nobody "uses" a toolkit the way they use a website — the people who
+use it are developers building their own products on top.
+
+**Do not trace execution order for a library.** There is no user-facing flow to
+follow, and the call chain is only the call chain: this calls that, which calls
+the next thing. It is accurate and it teaches nothing. That mistake produces
+tours that sound like "a client is created, which builds an agent, which starts
+a session" — true, and worth nothing to someone trying to understand the thing.
+
+**Start from how it is used.** The repository summary carries the usage example
+from the README. Those few lines are the real entry point: they show what a
+person holds, in what order, and what they get back. Walk *those*, one piece at
+a time, and go into the code to answer "what does this one actually do for me?"
+
+For each layer, answer the only question that matters about a layer:
+
+- **What does it hide?** "This is the part that means you never have to think
+  about audio formats."
+- **What would you write yourself without it?**
+- **Why is it separate from its neighbour?** Two things that sound alike need
+  their division of labour explained, with a comparison.
+
+Reach for the end user only where the code genuinely reaches them — the voice
+someone hears, the pause before an answer, the call that drops.
 
 Many are. Nobody "uses" a toolkit the way they use a website — the people who
 use it are developers building their own products on top.

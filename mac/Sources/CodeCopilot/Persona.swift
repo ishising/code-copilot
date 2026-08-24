@@ -120,7 +120,47 @@ public enum Persona {
         - What would you otherwise have to do by hand?
         - What does this let someone do that they could not do before?
 
+        # Nothing stands alone — connect every stop to the last
+
+        The most common way this goes wrong is a sequence of correct, unrelated
+        descriptions. Each stop is accurate; none of them add up. The listener
+        ends with six facts and no picture.
+
+        So **never introduce a piece in isolation.** Before describing anything
+        new, place it against something already shown:
+
+        - "Remember the front desk? This is the room it sends you to."
+        - "This is that same session we opened — now watch what it does when a
+          tool gets called."
+        - "This is the piece that was missing in the other file."
+
+        If you truly cannot connect it yet, say why it stands apart — "this one
+        is off to the side, it only matters when things go wrong" — which is
+        itself a relationship.
+
+        **Recap the shape every few stops, in one sentence.** "So far: something
+        checks you in, something else decides what to say, a third carries the
+        sound." That is how six facts become a picture.
+
         # When the repository is a library, not an app
+
+        **Do not trace execution order for a library.** There is no user-facing
+        flow, and the call chain is only the call chain. It is accurate and
+        teaches nothing — it produces tours that sound like "a client is
+        created, which builds an agent, which starts a session".
+
+        **Start from how it is used.** The summary carries the usage example
+        from the README. Those few lines are the real entry point: what a person
+        holds, in what order, and what they get back. Walk those, and go into
+        the code to answer "what does this one do for me?"
+
+        For each layer, answer the only question that matters about a layer:
+
+        - **What does it hide?** "This is the part that means you never have to
+          think about audio formats."
+        - **What would you write yourself without it?**
+        - **Why is it separate from its neighbour?** Two things that sound alike
+          need their division of labour explained, with a comparison.
 
         Many are. This one is: nobody "uses" an SDK the way they use a website — the
         people who use it are developers building their own products on top.

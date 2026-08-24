@@ -18,6 +18,37 @@ public enum Brief {
 
     static let readmeBudget = 1500
 
+/// The usage example from the README — how a person actually holds this.
+    ///
+    /// For a library this is the most valuable thing in the repository and it
+    /// is not reachable by tracing code: there is no user-facing flow, and the
+    /// internal call chain is just the call chain. Five lines of usage say what
+    /// the layers are for in a way that walking them never does.
+    ///
+    /// Shell blocks are skipped — `npm install` teaches nothing about shape.
+    static func usageExample(_ readme: String) -> String? {
+        let fence = #"```[a-z]*\n([\s\S]*?)```"#
+        guard
+            let regex = try? NSRegularExpression(pattern: fence, options: [])
+        else { return nil }
+
+        let range = NSRange(readme.startIndex..., in: readme)
+        var blocks: [String] = []
+        regex.enumerateMatches(in: readme, options: [], range: range) { match, _, _ in
+            guard let match, match.numberOfRanges > 1,
+                let r = Range(match.range(at: 1), in: readme)
+            else { return }
+            let block = String(readme[r]).trimmingCharacters(in: .whitespacesAndNewlines)
+            let shell = #"^(npm|pnpm|yarn|pip|uv|curl|brew|cd |git |export |\$)"#
+            guard block.split(separator: "\n").count >= 4,
+                block.range(of: shell, options: .regularExpression) == nil
+            else { return }
+            blocks.append(block)
+        }
+        guard !blocks.isEmpty else { return nil }
+        return String(blocks.prefix(2).joined(separator: "\n\n---\n\n").prefix(1800))
+    }
+
     public static func build(
         snapshot: GitHub.Snapshot,
         manifests found: [String: String]
@@ -62,6 +93,12 @@ public enum Brief {
         }
 
         if let readme = snapshot.readme {
+            if let usage = usageExample(readme) {
+                lines.append("")
+                lines.append("HOW IT IS USED (from the README) — for a library this is")
+                lines.append("the real entry point, not whatever runs first:")
+                lines.append(usage)
+            }
             lines.append("")
             lines.append("README (beginning):")
             lines.append(String(readme.prefix(readmeBudget)))

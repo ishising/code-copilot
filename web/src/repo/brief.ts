@@ -113,6 +113,26 @@ function list(items: string[], max: number): string {
   return rest > 0 ? `${shown} (+${rest} more)` : shown;
 }
 
+/** The usage example from the README — how a person actually holds this thing.
+ *
+ *  For a library this is the most valuable thing in the repository and it is
+ *  not reachable by tracing code: there is no user-facing flow to follow, and
+ *  the internal call chain is just the call chain. Five lines of usage say
+ *  what the layers are for in a way that walking them never does.
+ *
+ *  Shell blocks are skipped — `npm install` teaches nothing about the shape. */
+function usageExample(readme: string): string | null {
+  const blocks = [...readme.matchAll(/```[a-z]*\n([\s\S]*?)```/g)]
+    .map((match) => (match[1] ?? '').trim())
+    .filter((block) => {
+      const lines = block.split('\n');
+      if (lines.length < 4) return false;
+      return !/^(npm|pnpm|yarn|pip|uv|curl|brew|cd |git |export |\$)/.test(block);
+    });
+  if (blocks.length === 0) return null;
+  return blocks.slice(0, 2).join('\n\n---\n\n').slice(0, 1800);
+}
+
 export function buildBrief(
   snapshot: RepoSnapshot,
   manifests: Map<string, string>,
@@ -153,6 +173,12 @@ export function buildBrief(
   }
 
   if (snapshot.readme !== null) {
+    const usage = usageExample(snapshot.readme);
+    if (usage !== null) {
+      lines.push('', 'HOW IT IS USED (from the README) — for a library this is');
+      lines.push('the real entry point, not whatever runs first:', usage);
+    }
+
     const excerpt = snapshot.readme.slice(0, README_BUDGET);
     lines.push('', 'README (beginning):', excerpt);
     if (snapshot.readme.length > README_BUDGET) {
