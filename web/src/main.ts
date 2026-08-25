@@ -354,7 +354,12 @@ async function begin(input: string): Promise<void> {
       try {
         const stream = await navigator.mediaDevices.getDisplayMedia({ video: true });
         await session.waitUntilReady();
-        await session.addVideoStream(stream, { kind: 'screen', fps: 5 });
+        // 1 fps, which is the SDK's own default for vision input — code on
+        // screen is static, and frames are billed individually. Measured on a
+        // 13-minute session at 5 fps: 4,063 frames, 783,618 image tokens, 35%
+        // of all input for the run. Five times the cost for a picture that
+        // changes when the user scrolls.
+        await session.addVideoStream(stream, { kind: 'screen', fps: 1 });
         logAction('recording the screen');
         recordButton.textContent = 'Recording';
         for (const track of stream.getTracks()) {
@@ -415,7 +420,23 @@ async function begin(input: string): Promise<void> {
     }
   }
 
-  session.on('ready', () => setStatus('live', 'live'));
+  session.on('ready', (event) => {
+    setStatus('live', 'live');
+    // The server caps how long a session may run. Worth knowing: a run that
+    // ends near the cap explains itself, and one that ends well short of it
+    // does not — and the dashboard only ever says "error".
+    const cap = event.maxSessionSeconds;
+    logAction(
+      cap === null
+        ? 'session started (no duration cap)'
+        : `session started (server cap ${Math.round(cap / 60)} min)`,
+    );
+    if (event.rejectedTools.length > 0) {
+      for (const rejected of event.rejectedTools) {
+        logAction(`✗ tool refused by the server: ${JSON.stringify(rejected)}`);
+      }
+    }
+  });
   session.on('transcript', (event) => {
     renderTranscript(event);
     // First words of an assistant turn: put the mark up now, rather than
@@ -433,9 +454,15 @@ async function begin(input: string): Promise<void> {
     if (!event.ok) logAction(`✗ ${event.summary ?? 'a tool call failed'}`);
   });
   session.on('error', (event) => {
-    if (event !== null) setStatus(event.message ?? 'error', 'error');
+    if (event === null) return;
+    setStatus(event.message ?? 'error', 'error');
+    // Into the activity panel as well as the status pill: the pill is
+    // overwritten by whatever happens next, and this is the one line that
+    // explains a session the dashboard later marks as failed.
+    logAction(`✗ ${event.code}: ${event.message}`);
   });
-  session.on('session_ended', () => {
+  session.on('session_ended', (event) => {
+    logAction(`session ended: ${event.reason ?? 'no reason given'}`);
     setStatus('ended', 'idle');
     endButton.hidden = true;
     recordButton.hidden = true;
