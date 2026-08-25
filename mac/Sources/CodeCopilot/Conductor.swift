@@ -242,7 +242,9 @@ public final class Conductor {
     public func choose(_ route: Route) async {
         guard let session else { return }
         routes = []
-        turns.append(Turn(speaker: "you", text: route.label))
+        // No local echo of the label. `send(text:)` has no way to keep the
+        // sent text out of the transcript, so the server sends it back as a
+        // user turn — appending one here too printed the choice twice.
         do {
             try await session.send(text: "Walk me through this: \(route.label)")
         } catch {

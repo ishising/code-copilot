@@ -30,6 +30,7 @@ const app = el('app');
 const repoName = el('repo-name');
 const statusPill = el('status');
 const endButton = el<HTMLButtonElement>('end');
+const recordButton = el<HTMLButtonElement>('record');
 const treeHost = el('tree');
 const codeHost = el('code');
 const crumb = el('crumb');
@@ -88,7 +89,12 @@ function renderTranscript(event: {
 }): void {
   const key = `${event.turnId}:${event.role}`;
   let bubble = bubbles.get(key);
-  if (bubble === undefined || !event.append) {
+  // Only ever one bubble per turn. The final event for a turn carries the
+  // whole text and arrives with `append: false`, so treating "not an append"
+  // as "start a new bubble" printed every turn twice — once accumulated from
+  // fragments, once complete. Whether to append or replace is decided below;
+  // it is not a reason to make a second bubble.
+  if (bubble === undefined) {
     bubble = document.createElement('div');
     bubble.className = `turn ${event.role}`;
     const who = document.createElement('span');
@@ -295,7 +301,12 @@ async function begin(input: string): Promise<void> {
           text: route.label,
           append: false,
         });
-        void live?.sendText(`Walk me through this: ${route.label}`);
+        // `transcript: false` because the bubble above is already the record
+        // of what they chose. Without it the pane shows the label they clicked
+        // and then the sentence we built from it, as two separate turns.
+        void live?.sendText(`Walk me through this: ${route.label}`, {
+          transcript: false,
+        });
       });
     },
   });
@@ -333,6 +344,34 @@ async function begin(input: string): Promise<void> {
   endButton.hidden = false;
   endButton.onclick = () => void session.end();
 
+  // A button, because the automatic request at submit time is fragile: it
+  // depends on the picker being answered while the repo reads, and on this
+  // browser exposing capture at all. Clicking is its own user activation, so
+  // this path always has the gesture `getDisplayMedia` requires.
+  recordButton.onclick = () => {
+    recordButton.disabled = true;
+    void (async () => {
+      try {
+        const stream = await navigator.mediaDevices.getDisplayMedia({ video: true });
+        await session.waitUntilReady();
+        await session.addVideoStream(stream, { kind: 'screen', fps: 5 });
+        logAction('recording the screen');
+        recordButton.textContent = 'Recording';
+        for (const track of stream.getTracks()) {
+          track.addEventListener('ended', () => {
+            logAction('screen recording stopped');
+            recordButton.textContent = 'Record screen';
+            recordButton.disabled = false;
+          });
+        }
+      } catch (error: unknown) {
+        const why = error instanceof Error ? error.message : String(error);
+        logAction(`not recording the screen — ${why}`);
+        recordButton.disabled = false;
+      }
+    })();
+  };
+
   // Publish the screen the user already picked, if they picked one.
   //
   // `addVideoStream` rather than `startScreenShare`, because that one would
@@ -343,16 +382,29 @@ async function begin(input: string): Promise<void> {
   //
   // The default fps is about 1, tuned for a model glancing at a frame. This
   // is meant to be watched back by a person, so it matches the Mac app's 5.
-  if (pendingScreen !== null) {
+  // Recording is the default, not a thing to opt into: the stream was already
+  // requested at submit, and the button below only surfaces if that failed.
+  // A browser will not hand over a screen without the user picking one, so the
+  // picker itself is not something this can skip — only the second click is.
+  if (pendingScreen === null) {
+    recordButton.hidden = false;
+  } else {
     const stream = pendingScreen;
     pendingScreen = null;
+    // Only once the session is live: `addVideoStream` refuses while the
+    // transport is still connecting, and `agent.start()` resolving is not the
+    // same moment as the room being ready to carry a track.
     void session
-      .addVideoStream(stream, { kind: 'screen', fps: 5 })
-      .then(() => logAction('recording the screen'))
+      .waitUntilReady()
+      .then(() => session.addVideoStream(stream, { kind: 'screen', fps: 5 }))
+      .then(() => {
+        logAction('recording the screen');
+      })
       .catch((error: unknown) => {
         const why = error instanceof Error ? error.message : String(error);
         logAction(`not recording the screen — ${why}`);
         for (const track of stream.getTracks()) track.stop();
+        recordButton.hidden = false;
       });
 
     // Stopping the share from the browser's own "stop sharing" bar ends the
@@ -386,6 +438,7 @@ async function begin(input: string): Promise<void> {
   session.on('session_ended', () => {
     setStatus('ended', 'idle');
     endButton.hidden = true;
+    recordButton.hidden = true;
   });
 }
 
@@ -416,8 +469,13 @@ setupForm.onsubmit = (event) => {
       })
       .catch((error: unknown) => {
         const why = error instanceof Error ? error.message : String(error);
-        logAction(`not recording the screen — ${why}`);
+        logAction(`not recording the screen — ${why} (use Record screen to retry)`);
       });
+  } else {
+    // Silence here is what made the last failure impossible to diagnose: no
+    // picker appeared, nothing was recorded, and nothing said why. Screen
+    // capture is missing in insecure contexts and in some embedded webviews.
+    logAction('not recording the screen — this browser exposes no screen capture');
   }
 
   void begin(repoInput.value).catch((error: unknown) => {
