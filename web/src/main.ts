@@ -333,19 +333,35 @@ async function begin(input: string): Promise<void> {
   endButton.hidden = false;
   endButton.onclick = () => void session.end();
 
-  // Record the screen alongside the audio, for the whole session.
+  // Publish the screen the user already picked, if they picked one.
   //
-  // The browser owns the picker here, so this is a prompt the user answers —
-  // and cancelling it is a normal thing to do, not a failure of the session.
-  // A rejected share must therefore never take the walk down with it: the
-  // copilot works exactly as well unrecorded.
-  void session
-    .startScreenShare()
-    .then(() => logAction('recording the screen'))
-    .catch((error: unknown) => {
-      const why = error instanceof Error ? error.message : String(error);
-      logAction(`not recording the screen — ${why}`);
-    });
+  // `addVideoStream` rather than `startScreenShare`, because that one would
+  // call `getDisplayMedia` again from here — far outside the click that
+  // authorised it — which is exactly the failure this replaces. `kind:
+  // 'screen'` makes the transport publish it as a screen-share track rather
+  // than a camera.
+  //
+  // The default fps is about 1, tuned for a model glancing at a frame. This
+  // is meant to be watched back by a person, so it matches the Mac app's 5.
+  if (pendingScreen !== null) {
+    const stream = pendingScreen;
+    pendingScreen = null;
+    void session
+      .addVideoStream(stream, { kind: 'screen', fps: 5 })
+      .then(() => logAction('recording the screen'))
+      .catch((error: unknown) => {
+        const why = error instanceof Error ? error.message : String(error);
+        logAction(`not recording the screen — ${why}`);
+        for (const track of stream.getTracks()) track.stop();
+      });
+
+    // Stopping the share from the browser's own "stop sharing" bar ends the
+    // track, not the session. Say so, or the recording quietly stops being a
+    // recording with nothing to show for it.
+    for (const track of stream.getTracks()) {
+      track.addEventListener('ended', () => logAction('screen recording stopped'));
+    }
+  }
 
   session.on('ready', () => setStatus('live', 'live'));
   session.on('transcript', (event) => {
@@ -373,8 +389,37 @@ async function begin(input: string): Promise<void> {
   });
 }
 
+/**
+ * The screen the user picked, captured while their click still counts.
+ *
+ * `getDisplayMedia` requires transient user activation — a *recent* click —
+ * and an earlier version asked for it after `agent.start()` resolved, tens of
+ * seconds and several awaits later. The browser refused every time, silently
+ * enough that five sessions recorded nothing before anyone noticed. So the
+ * request is issued from inside the submit handler, before anything is
+ * awaited, and the resulting track waits here until there is a session to
+ * publish it on.
+ */
+let pendingScreen: MediaStream | null = null;
+
 setupForm.onsubmit = (event) => {
   event.preventDefault();
+
+  // Fired, deliberately, without awaiting: holding up the repo read on a
+  // picker the user might sit on for ten seconds would make the walk feel
+  // broken. Declining is normal and simply leaves the session unrecorded.
+  if (navigator.mediaDevices?.getDisplayMedia) {
+    void navigator.mediaDevices
+      .getDisplayMedia({ video: true })
+      .then((stream) => {
+        pendingScreen = stream;
+      })
+      .catch((error: unknown) => {
+        const why = error instanceof Error ? error.message : String(error);
+        logAction(`not recording the screen — ${why}`);
+      });
+  }
+
   void begin(repoInput.value).catch((error: unknown) => {
     console.error(error);
     say('Something broke — check the browser console', true);
