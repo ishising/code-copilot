@@ -11,6 +11,18 @@ import Foundation
 /// `cosmo_sdk_screen_highlight_element` replaces both, and `user_focus` is now
 /// answered by the accessibility tree instead of a click handler — which makes
 /// it exact rather than a guess.
+/// One thing the agent offers to walk, rendered as a button in the panel.
+///
+/// The agent chooses these, not a heuristic over the file tree: it has just
+/// read the summary and is the only thing here that knows which parts of *this*
+/// repository are worth an hour. Clicking one sends its label back as a spoken
+/// turn, so a click and saying it out loud take exactly the same path.
+public struct Route: Identifiable, Equatable, Sendable {
+    public let id = UUID()
+    public let label: String
+    public let summary: String
+}
+
 @MainActor
 public final class RepoTools {
 
@@ -23,19 +35,22 @@ public final class RepoTools {
     private var cache: [String: String]
     private let allPaths: [String]
     private let onActivity: @MainActor (String) -> Void
+    private let onRoutes: @MainActor ([Route]) -> Void
 
     public init(
         ref: GitHub.Ref,
         overlay: Overlay,
         cache: [String: String],
         allPaths: [String],
-        onActivity: @escaping @MainActor (String) -> Void
+        onActivity: @escaping @MainActor (String) -> Void,
+        onRoutes: @escaping @MainActor ([Route]) -> Void = { _ in }
     ) {
         self.ref = ref
         self.overlay = overlay
         self.cache = cache
         self.allPaths = allPaths
         self.onActivity = onActivity
+        self.onRoutes = onRoutes
     }
 
     public func agentTools() throws -> [AgentTool] {
@@ -43,6 +58,7 @@ public final class RepoTools {
             try readFile(),
             try findInRepo(),
             try userFocus(),
+            try offerRoutes(),
             // The SDK's own screen surface. `screenLocate` answers the capture
             // RPC the server-side locator drives; `screenHighlightElement`
             // renders what it found. No click tool: the user does the acting.
@@ -75,6 +91,66 @@ public final class RepoTools {
                 }
             },
         ]
+    }
+
+    // MARK: - what to walk
+
+    private struct RouteArgs: Decodable, Sendable {
+        struct Item: Decodable, Sendable {
+            let label: String
+            let summary: String
+        }
+        let routes: [Item]
+    }
+
+    /// Offered once, at the top of a session. The panel draws a button per
+    /// route; the user can still ignore all of them and say what they want.
+    private func offerRoutes() throws -> AgentTool {
+        try AgentTool.define(
+            name: "offer_routes",
+            description:
+                "Offer the user three to five different ways into this repository, shown "
+                + "as buttons they can click. Call this once, at the start, after you have "
+                + "said what the software is — then stop talking and wait for them to "
+                + "choose. Draw the routes from the summary and make them about genuinely "
+                + "different things, not three flavours of how it starts up. At least one "
+                + "should be about what the software does rather than how it connects or "
+                + "configures itself.",
+            input: .object(
+                properties: [
+                    // The schema builder has no min/max for arrays, so the
+                    // count lives in the description where the model reads it.
+                    "routes": .array(
+                        items: .object(
+                            properties: [
+                                "label": .string(
+                                    description:
+                                        "Short button text, a few words, in their language "
+                                        + "not the code's. E.g. 'How a question becomes speech'."),
+                                "summary": .string(
+                                    description:
+                                        "One line on what they would come away understanding."),
+                            ],
+                            required: ["label", "summary"]
+                        ),
+                        description: "Three to five routes, most interesting first."
+                    )
+                ],
+                required: ["routes"]
+            )
+        ) { (args: RouteArgs) in
+            await MainActor.run {
+                let routes = args.routes.map { Route(label: $0.label, summary: $0.summary) }
+                self.onRoutes(routes)
+                self.onActivity("offered \(routes.count) routes")
+                return [
+                    "shown": .bool(true),
+                    "note": .string(
+                        "The buttons are on their screen. Say they can pick one or just "
+                            + "tell you what they want, then stop and wait."),
+                ]
+            }
+        }
     }
 
     // MARK: - reading the repository

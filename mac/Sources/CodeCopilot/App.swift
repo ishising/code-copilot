@@ -41,6 +41,11 @@ struct PanelView: View {
                 Divider()
             }
 
+            if !conductor.routes.isEmpty {
+                routePicker
+                Divider()
+            }
+
             transcript
         }
         .background(Color(nsColor: .windowBackgroundColor))
@@ -110,6 +115,42 @@ struct PanelView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(12)
         .background(Color.orange.opacity(0.10))
+    }
+
+    /// The agent's own suggestions, not a fixed menu — so this is built from
+    /// whatever it offered and disappears once something is chosen. Saying one
+    /// of these out loud instead works identically; the buttons only save the
+    /// user from having to invent the question.
+    private var routePicker: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("WHERE WOULD YOU LIKE TO START?")
+                .font(.system(size: 9, weight: .semibold))
+                .foregroundStyle(.secondary)
+
+            ForEach(conductor.routes) { route in
+                Button {
+                    Task { await conductor.choose(route) }
+                } label: {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(route.label).font(.callout.weight(.medium))
+                        Text(route.summary)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .multilineTextAlignment(.leading)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.bordered)
+            }
+
+            Text("Or just say what you want to understand.")
+                .font(.caption)
+                .foregroundStyle(.tertiary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(12)
     }
 
     private var transcript: some View {

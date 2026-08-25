@@ -44,6 +44,10 @@ public final class Conductor {
     /// matter how well the agent pronounces them, so the precise spelling has
     /// to reach the user through a channel that never passes through audio.
     public private(set) var activity: [String] = []
+    /// Ways into this repository, offered by the agent once it has read the
+    /// summary. Empty until then, and cleared the moment one is taken — they
+    /// are an opening, not a permanent menu.
+    public private(set) var routes: [Route] = []
     public private(set) var problem: String?
 
     private var session: RealtimeSession?
@@ -52,6 +56,7 @@ public final class Conductor {
     private var tools: RepoTools?
     private var pump: Task<Void, Never>?
     private let overlay = Overlay()
+    private let recorder = Recorder()
 
     public init() {}
 
@@ -70,6 +75,7 @@ public final class Conductor {
         problem = nil
         turns = []
         activity = []
+        routes = []
         phase = .reading("reading \(ref.owner)/\(ref.repo)…")
 
         do {
@@ -109,7 +115,8 @@ public final class Conductor {
             overlay: overlay,
             cache: cache,
             allPaths: snapshot.entries.map(\.path),
-            onActivity: { [weak self] line in self?.note(line) }
+            onActivity: { [weak self] line in self?.note(line) },
+            onRoutes: { [weak self] offered in self?.routes = offered }
         )
         self.tools = tools
 
@@ -142,10 +149,39 @@ public final class Conductor {
             storeRecording: true,
             storeAudio: true,
             storeTranscript: true,
-            storeVideo: false
+            // Not a no-op: the session publishes a screen share below, so this
+            // declines to switch video retention off. Whether the video is
+            // actually kept is the workspace's consent setting, not this flag.
+            storeVideo: true
         )
         self.session = session
         consume(session)
+        await record(into: session)
+    }
+
+    // MARK: - recording the screen
+
+    /// Publish the display alongside the audio, for the whole session.
+    ///
+    /// Failure here is deliberately not fatal. Screen Recording permission can
+    /// be absent, or the publish can be refused, and neither is a reason to
+    /// take down a walk that works perfectly well unrecorded — the user came
+    /// for the tour, not the tape. It is said out loud in the panel instead,
+    /// because a recording silently not happening is the kind of thing you
+    /// only discover when you go looking for it.
+    private func record(into session: RealtimeSession) async {
+        do {
+            try await session.startScreenShare()
+            try await recorder.start { [weak session] frame in
+                session?.pushScreenShareFrame(frame)
+            }
+            note("recording the screen")
+        } catch {
+            let why = (error as? ScreenCaptureUnavailable)?.message
+                ?? (error as? LocalizedError)?.errorDescription ?? "\(error)"
+            note("not recording the screen — \(why)")
+            await recorder.stop()
+        }
     }
 
     // MARK: - events
@@ -200,6 +236,20 @@ public final class Conductor {
         }
     }
 
+    /// Take one of the offered routes. `send(text:)` asks — it lands as a turn
+    /// and the agent answers it — where `send(context:)` would only tell it
+    /// something and wait for the next thing the user said out loud.
+    public func choose(_ route: Route) async {
+        guard let session else { return }
+        routes = []
+        turns.append(Turn(speaker: "you", text: route.label))
+        do {
+            try await session.send(text: "Walk me through this: \(route.label)")
+        } catch {
+            problem = (error as? LocalizedError)?.errorDescription ?? "\(error)"
+        }
+    }
+
     private func note(_ line: String) {
         activity.append(line)
         if activity.count > 200 { activity.removeFirst(activity.count - 200) }
@@ -209,6 +259,12 @@ public final class Conductor {
 
     public func stop() async {
         overlay.clear()
+        routes = []
+        // Stop the capture before the session goes: frames pushed into an
+        // ended session are dropped, but the stream would otherwise keep
+        // capturing the display after the walk is over.
+        await recorder.stop()
+        await session?.stopScreenShare()
         await session?.end()
         pump?.cancel()
         session = nil

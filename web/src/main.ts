@@ -11,6 +11,7 @@ import {
 } from './repo/github';
 import { markToPromote, type PendingMark } from './repo/mark_timing';
 import { repoTools } from './repo/tools';
+import type { Route } from './repo/tools';
 import { createViewer } from './repo/viewer';
 
 const el = <T extends HTMLElement>(id: string): T => {
@@ -54,7 +55,10 @@ const RECORDING = {
   storeRecording: true,
   storeAudio: true,
   storeTranscript: true,
-  storeVideo: false, // nothing here publishes video; this is a no-op either way
+  // The session publishes a screen share (see below), so this one is not a
+  // no-op: it declines to switch video retention off. Whether the video is
+  // actually kept is still the workspace's consent setting, not this flag.
+  storeVideo: true,
   // `satisfies` rather than a bare object: these are passed as a variable, so
   // excess-property checking is off and a typo'd flag would compile silently
   // and be ignored at runtime — exactly the failure you would never notice.
@@ -106,6 +110,53 @@ function logAction(text: string): void {
   line.className = 'act';
   line.textContent = text;
   transcriptPane.appendChild(line);
+  transcriptPane.scrollTop = transcriptPane.scrollHeight;
+}
+
+/** The agent's opening offer, drawn as buttons in the transcript.
+ *
+ *  Not a fixed menu: the routes are whatever it proposed after reading the
+ *  summary, and saying one out loud instead works identically. The buttons
+ *  only save the user from having to invent the question — which is the whole
+ *  problem this app exists for.
+ */
+function renderRoutes(routes: Route[], choose: (route: Route) => void): void {
+  const block = document.createElement('div');
+  block.className = 'routes';
+
+  const heading = document.createElement('div');
+  heading.className = 'act';
+  heading.textContent = 'where would you like to start?';
+  block.appendChild(heading);
+
+  for (const route of routes) {
+    const button = document.createElement('button');
+    button.className = 'route';
+    button.type = 'button';
+
+    const label = document.createElement('span');
+    label.className = 'route-label';
+    label.textContent = route.label;
+
+    const summary = document.createElement('span');
+    summary.className = 'route-summary';
+    summary.textContent = route.summary;
+
+    button.append(label, summary);
+    button.onclick = () => {
+      // The offer is spent either way — a second click would ask twice.
+      block.remove();
+      choose(route);
+    };
+    block.appendChild(button);
+  }
+
+  const hint = document.createElement('div');
+  hint.className = 'act';
+  hint.textContent = 'or just say what you want to understand';
+  block.appendChild(hint);
+
+  transcriptPane.appendChild(block);
   transcriptPane.scrollTop = transcriptPane.scrollHeight;
 }
 
@@ -220,6 +271,10 @@ async function begin(input: string): Promise<void> {
   }
 
   let pendingMark: PendingMark | null = null;
+  // `offer_routes` only ever fires inside a live session, but the tools are
+  // built before `agent.start()` returns — so the closure reads this rather
+  // than capturing a session that does not exist yet.
+  let live: Awaited<ReturnType<typeof agent.start>> | undefined;
 
   const tools = repoTools({
     ref,
@@ -229,6 +284,19 @@ async function begin(input: string): Promise<void> {
     allPaths: [...paths],
     onRead: (path, from, to) => {
       pendingMark = { path, from, to, at: Date.now() };
+    },
+    onRoutes: (routes) => {
+      renderRoutes(routes, (route) => {
+        // `sendText` asks — it lands as a turn and the agent answers it. A
+        // click and saying the same sentence take exactly the same path.
+        renderTranscript({
+          turnId: `route-${Date.now()}`,
+          role: 'user',
+          text: route.label,
+          append: false,
+        });
+        void live?.sendText(`Walk me through this: ${route.label}`);
+      });
     },
   });
 
@@ -253,6 +321,7 @@ async function begin(input: string): Promise<void> {
   let session;
   try {
     session = await agent.start(RECORDING);
+    live = session;
   } catch (error) {
     const why = sessionStartMessage(error);
     setStatus('session failed', 'error');
@@ -263,6 +332,20 @@ async function begin(input: string): Promise<void> {
 
   endButton.hidden = false;
   endButton.onclick = () => void session.end();
+
+  // Record the screen alongside the audio, for the whole session.
+  //
+  // The browser owns the picker here, so this is a prompt the user answers —
+  // and cancelling it is a normal thing to do, not a failure of the session.
+  // A rejected share must therefore never take the walk down with it: the
+  // copilot works exactly as well unrecorded.
+  void session
+    .startScreenShare()
+    .then(() => logAction('recording the screen'))
+    .catch((error: unknown) => {
+      const why = error instanceof Error ? error.message : String(error);
+      logAction(`not recording the screen — ${why}`);
+    });
 
   session.on('ready', () => setStatus('live', 'live'));
   session.on('transcript', (event) => {

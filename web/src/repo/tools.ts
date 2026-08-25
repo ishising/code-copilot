@@ -48,10 +48,19 @@ export type RepoToolsOptions = {
    *  about to talk about. The caller uses this to put the mark up when speech
    *  starts rather than when the model finally emits `highlight_lines`. */
   onRead?: (path: string, from: number, to: number) => void;
+  /** Fired when the agent offers ways into the repository at the top of a
+   *  session. The caller draws a button per route. The agent picks these
+   *  rather than a heuristic over the file tree, because it has just read the
+   *  summary and is the only thing here that knows which parts of *this*
+   *  repository are worth an hour. */
+  onRoutes?: (routes: Route[]) => void;
 };
 
+/** One thing the agent offers to walk, rendered as a button. */
+export type Route = { label: string; summary: string };
+
 export function repoTools(options: RepoToolsOptions): RepoTools {
-  const { ref, viewer, onActivity, cache, allPaths, onRead } = options;
+  const { ref, viewer, onActivity, cache, allPaths, onRead, onRoutes } = options;
 
   async function textOf(path: string): Promise<string> {
     const hit = cache.get(path);
@@ -260,6 +269,70 @@ export function repoTools(options: RepoToolsOptions): RepoTools {
     },
   });
 
+  const offerRoutes = tool({
+    name: 'offer_routes',
+    description:
+      'Offer the user three to five different ways into this repository, ' +
+      'shown as buttons they can click. Call this once, at the start, after ' +
+      'you have said what the software is — then stop talking and wait for ' +
+      'them to choose. Draw the routes from the summary and make them about ' +
+      'genuinely different things, not three flavours of how it starts up. ' +
+      'At least one should be about what the software does rather than how ' +
+      'it connects or configures itself.',
+    parameters: {
+      type: 'object',
+      properties: {
+        routes: {
+          type: 'array',
+          // No minItems/maxItems: the SDK allows only a fixed set of schema
+          // keys and rejects the whole tool at session start otherwise, which
+          // surfaces as a session that will not connect rather than as a bad
+          // tool. The count lives in the description, where the model reads it.
+          description: 'Three to five routes, most interesting first.',
+          items: {
+            type: 'object',
+            properties: {
+              label: {
+                type: 'string',
+                description:
+                  "Short button text, a few words, in their language not the " +
+                  "code's. E.g. 'How a question becomes speech'.",
+              },
+              summary: {
+                type: 'string',
+                description: 'One line on what they would come away understanding.',
+              },
+            },
+            required: ['label', 'summary'],
+          },
+        },
+      },
+      required: ['routes'],
+    },
+    handler: async (args) => {
+      const raw = Array.isArray(args['routes']) ? args['routes'] : [];
+      const routes: Route[] = raw
+        .map((item) => ({
+          label: String((item as Route)?.label ?? '').trim(),
+          summary: String((item as Route)?.summary ?? '').trim(),
+        }))
+        .filter((route) => route.label.length > 0);
+
+      if (routes.length === 0) {
+        return { shown: false, reason: 'no usable routes — give each one a label' };
+      }
+
+      onRoutes?.(routes);
+      onActivity(`offered ${routes.length} routes`);
+      return {
+        shown: true,
+        note:
+          'The buttons are on their screen. Say they can pick one or just ' +
+          'tell you what they want, then stop and wait.',
+      };
+    },
+  });
+
   const userFocus = tool({
     name: 'user_focus',
     description:
@@ -286,7 +359,7 @@ export function repoTools(options: RepoToolsOptions): RepoTools {
   });
 
   return {
-    specs: [readFile, findInRepo, highlightLines, highlightPath, userFocus],
+    specs: [readFile, findInRepo, highlightLines, highlightPath, userFocus, offerRoutes],
     cache,
   };
 }
