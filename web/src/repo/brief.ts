@@ -148,7 +148,29 @@ export function buildBrief(
   if (snapshot.description !== null && snapshot.description !== '') {
     lines.push(`GitHub description: ${snapshot.description}`);
   }
+  // What it is, before where it is. This ordering is deliberate: the model's
+  // attention is highest at the top of the brief, and a wall of borrowed
+  // package names there taught it that the transport layer was the interesting
+  // part of an SDK. Usage and README go first; the file census is orientation,
+  // not subject matter.
+  if (snapshot.readme !== null) {
+    const usage = usageExample(snapshot.readme);
+    if (usage !== null) {
+      lines.push('', 'HOW IT IS USED (from the README) — for a library this is');
+      lines.push('the real entry point, not whatever runs first:', usage);
+    }
+
+    const excerpt = snapshot.readme.slice(0, README_BUDGET);
+    lines.push('', 'README (beginning):', excerpt);
+    if (snapshot.readme.length > README_BUDGET) {
+      lines.push('[README continues — read it with read_file if you need the rest]');
+    }
+  } else {
+    lines.push('', 'No README in this repository.');
+  }
+
   lines.push(
+    '',
     `${files.length} files, ${groups.length} top-level folders` +
       (snapshot.truncated ? ' (tree truncated by GitHub — this is a big repo)' : ''),
   );
@@ -164,28 +186,19 @@ export function buildBrief(
     lines.push('', `STACK: ${stack.join(', ')} present.`);
   }
   if (deps.length > 0) {
-    lines.push(`DEPENDENCIES (${deps.length} total): ${list(deps, 30)}`);
+    // Twelve, not thirty. This is a hint about what was borrowed, and a long
+    // list reads as a list of topics worth walking.
+    lines.push(`DEPENDENCIES (${deps.length} total): ${list(deps, 12)}`);
   }
 
   const starts = entryPoints(snapshot.entries);
   if (starts.length > 0) {
-    lines.push('', `LIKELY ENTRY POINTS: ${starts.join(', ')}`);
-  }
-
-  if (snapshot.readme !== null) {
-    const usage = usageExample(snapshot.readme);
-    if (usage !== null) {
-      lines.push('', 'HOW IT IS USED (from the README) — for a library this is');
-      lines.push('the real entry point, not whatever runs first:', usage);
-    }
-
-    const excerpt = snapshot.readme.slice(0, README_BUDGET);
-    lines.push('', 'README (beginning):', excerpt);
-    if (snapshot.readme.length > README_BUDGET) {
-      lines.push('[README continues — read it with read_file if you need the rest]');
-    }
-  } else {
-    lines.push('', 'No README in this repository.');
+    lines.push(
+      '',
+      'LIKELY ENTRY POINTS (where execution begins — only worth walking if ' +
+        'this is an app, and not the subject of a library): ' +
+        starts.join(', '),
+    );
   }
 
   return lines.join('\n');

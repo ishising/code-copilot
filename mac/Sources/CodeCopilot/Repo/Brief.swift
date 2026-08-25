@@ -63,6 +63,31 @@ public enum Brief {
         }
 
         let (groups, loose) = topLevel(files)
+
+        // What it is, before where it is. This ordering is deliberate: the
+        // model's attention is highest at the top of the brief, and a wall of
+        // borrowed package names there taught it that the transport layer was
+        // the interesting part of an SDK. Usage and README go first; the file
+        // census is orientation, not subject matter.
+        if let readme = snapshot.readme {
+            if let usage = usageExample(readme) {
+                lines.append("")
+                lines.append("HOW IT IS USED (from the README) — for a library this is")
+                lines.append("the real entry point, not whatever runs first:")
+                lines.append(usage)
+            }
+            lines.append("")
+            lines.append("README (beginning):")
+            lines.append(String(readme.prefix(readmeBudget)))
+            if readme.count > readmeBudget {
+                lines.append("[README continues — read it with read_file if you need the rest]")
+            }
+        } else {
+            lines.append("")
+            lines.append("No README in this repository.")
+        }
+
+        lines.append("")
         lines.append(
             "\(files.count) files, \(groups.count) top-level folders"
                 + (snapshot.truncated ? " (tree truncated by GitHub — this is a big repo)" : ""))
@@ -83,31 +108,18 @@ public enum Brief {
         }
         let deps = dependencies(found)
         if !deps.isEmpty {
-            lines.append("DEPENDENCIES (\(deps.count) total): \(list(deps, max: 30))")
+            // Twelve, not thirty. This is a hint about what was borrowed, and
+            // a long list reads as a list of topics worth walking.
+            lines.append("DEPENDENCIES (\(deps.count) total): \(list(deps, max: 12))")
         }
 
         let starts = entryPoints(files)
         if !starts.isEmpty {
             lines.append("")
-            lines.append("LIKELY ENTRY POINTS: \(starts.joined(separator: ", "))")
-        }
-
-        if let readme = snapshot.readme {
-            if let usage = usageExample(readme) {
-                lines.append("")
-                lines.append("HOW IT IS USED (from the README) — for a library this is")
-                lines.append("the real entry point, not whatever runs first:")
-                lines.append(usage)
-            }
-            lines.append("")
-            lines.append("README (beginning):")
-            lines.append(String(readme.prefix(readmeBudget)))
-            if readme.count > readmeBudget {
-                lines.append("[README continues — read it with read_file if you need the rest]")
-            }
-        } else {
-            lines.append("")
-            lines.append("No README in this repository.")
+            lines.append(
+                "LIKELY ENTRY POINTS (where execution begins — only worth walking if "
+                    + "this is an app, and not the subject of a library): "
+                    + starts.joined(separator: ", "))
         }
 
         return lines.joined(separator: "\n")
