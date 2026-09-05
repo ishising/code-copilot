@@ -54,7 +54,26 @@
       </section>
 
       <aside id="side">
+        <div id="side-tabs">
+          <button id="tab-talk" class="tab active" type="button">Talk</button>
+          <button id="tab-map" class="tab" type="button">
+            Map <span id="map-count"></span>
+          </button>
+        </div>
         <div id="transcript"></div>
+        <div id="map-pane" hidden>
+          <div id="map-actions">
+            <span id="map-meta"></span>
+            <button id="map-export" type="button">Export</button>
+            <button id="map-clear" type="button">Clear</button>
+          </div>
+          <div id="map-host">
+            <p class="map-empty">
+              The map fills in as we walk &mdash; each stop, and what it
+              connects to. Click a box to open that code.
+            </p>
+          </div>
+        </div>
       </aside>
     </main>
 

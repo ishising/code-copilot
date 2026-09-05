@@ -62,6 +62,14 @@ Each app has its own README with setup. Credentials are shared: both read
 `web/.env`, which is git-ignored. Copy `web/.env.example` to `web/.env` and
 fill it in.
 
+## The map
+
+Both apps file every stop the agent takes into a per-repository map — what it
+was called out loud, what it is for, where it lives, and which earlier stop it
+connects to. The web app draws it live as a flowchart; both export it as
+Markdown with a Mermaid diagram for review, and both reopen a repository with
+"last time we covered…" instead of starting again.
+
 ## Notes worth keeping
 
 - **Chrome hides its page from accessibility** unless launched with

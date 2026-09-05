@@ -9,10 +9,12 @@ import {
   prefetchSources,
   type RepoRef,
 } from './repo/github';
+import { MapStore, mapKey } from './repo/map';
 import { markToPromote, type PendingMark } from './repo/mark_timing';
 import { repoTools } from './repo/tools';
 import type { Route } from './repo/tools';
-import { createViewer } from './repo/viewer';
+import { createViewer, type Viewer } from './repo/viewer';
+import mermaid from 'mermaid';
 
 const el = <T extends HTMLElement>(id: string): T => {
   const found = document.getElementById(id);
@@ -36,7 +38,119 @@ const codeHost = el('code');
 const crumb = el('crumb');
 const transcriptPane = el('transcript');
 
+const tabTalk = el<HTMLButtonElement>('tab-talk');
+const tabMap = el<HTMLButtonElement>('tab-map');
+const mapCount = el('map-count');
+const mapPane = el('map-pane');
+const mapHost = el('map-host');
+const mapMeta = el('map-meta');
+const mapExport = el<HTMLButtonElement>('map-export');
+const mapClear = el<HTMLButtonElement>('map-clear');
+
 const API_KEY = import.meta.env.VITE_COSMO_API_KEY;
+
+// ---- the map ----
+
+/** Per-repository, created at ingest. Module-level because the tabs, the
+ *  export button and the node clicks all outlive any one session. */
+let mapStore: MapStore | null = null;
+let currentViewer: Viewer | null = null;
+let renderCount = 0;
+
+mermaid.initialize({
+  startOnLoad: false,
+  theme: 'dark',
+  themeVariables: {
+    fontFamily: 'ui-sans-serif, system-ui, sans-serif',
+    fontSize: '13px',
+    lineColor: '#5c6675',
+    primaryTextColor: '#e6e9ef',
+  },
+  flowchart: { curve: 'basis', nodeSpacing: 30, rankSpacing: 40 },
+});
+
+function showTab(which: 'talk' | 'map'): void {
+  const map = which === 'map';
+  tabTalk.classList.toggle('active', !map);
+  tabMap.classList.toggle('active', map);
+  transcriptPane.hidden = map;
+  mapPane.hidden = !map;
+  app.classList.toggle('map-open', map);
+  if (map) void renderMap();
+}
+
+tabTalk.onclick = () => showTab('talk');
+tabMap.onclick = () => showTab('map');
+
+/** Draw the map. Mermaid renders to an SVG string; the node elements it
+ *  produces carry the node id inside their DOM id, which is how a click on a
+ *  box becomes "open that file at those lines". */
+async function renderMap(): Promise<void> {
+  const store = mapStore;
+  if (store === null) return;
+
+  mapCount.textContent = store.isEmpty ? '' : String(store.nodes.length);
+  mapMeta.textContent = store.isEmpty
+    ? ''
+    : `${store.nodes.length} stops · ${store.edges.length} connections`;
+
+  if (store.isEmpty) {
+    mapHost.innerHTML =
+      '<p class="map-empty">The map fills in as we walk — each stop, and what it ' +
+      'connects to. Click a box to open that code.</p>';
+    return;
+  }
+  if (mapPane.hidden) return; // nothing to lay out into; the count is enough
+
+  try {
+    renderCount += 1;
+    const { svg } = await mermaid.render(`map-svg-${renderCount}`, store.toMermaid());
+    mapHost.innerHTML = svg;
+  } catch (error) {
+    mapHost.innerHTML = `<p class="map-empty">Could not draw the map: ${
+      error instanceof Error ? error.message : String(error)
+    }</p>`;
+    return;
+  }
+
+  for (const node of store.nodes) {
+    if (node.path === undefined) continue;
+    const box = mapHost.querySelector<SVGGElement>(`.node[id*="-${node.id}-"]`);
+    if (box === null) continue;
+    box.classList.add('has-code');
+    box.addEventListener('click', () => {
+      const viewer = currentViewer;
+      const path = node.path;
+      if (viewer === null || path === undefined) return;
+      if (node.from !== undefined) {
+        void viewer.highlightLines(path, node.from, node.to ?? node.from, node.label);
+      } else {
+        void viewer.showFile(path);
+      }
+    });
+  }
+}
+
+mapExport.onclick = () => {
+  const store = mapStore;
+  if (store === null || store.isEmpty) return;
+  const blob = new Blob([store.toMarkdown()], { type: 'text/markdown' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `${store.key.replace(/[^a-z0-9]+/gi, '-')}-map.md`;
+  link.click();
+  URL.revokeObjectURL(url);
+  logAction('exported the map');
+};
+
+mapClear.onclick = () => {
+  const store = mapStore;
+  if (store === null || store.isEmpty) return;
+  if (!confirm('Clear the map for this repository? This cannot be undone.')) return;
+  store.clear();
+  logAction('cleared the map');
+};
 
 /** Server-side retention for each run.
  *
@@ -251,11 +365,23 @@ async function begin(input: string): Promise<void> {
     snapshot,
     load: (path) => fetchFile(ref, path),
   });
+  currentViewer = viewer;
+
+  // The map for this repository — restored from the last session, if there
+  // was one, so the walk can pick up where it left off.
+  const store = new MapStore(mapKey(ref));
+  mapStore = store;
+  store.onChange(() => void renderMap());
+  void renderMap();
+  if (!store.isEmpty) {
+    logAction(`map restored: ${store.nodes.length} stops from an earlier session`);
+  }
 
   if (import.meta.env.DEV) {
     // Handy from the browser console when a highlight lands somewhere odd:
     // __viewer.highlightLines('path/to/file.ts', 10, 14, 'here').
     (window as unknown as { __viewer?: unknown }).__viewer = viewer;
+    (window as unknown as { __map?: unknown }).__map = store;
   }
 
   // The repo is on screen and browsable from here on, so a missing key costs
@@ -288,6 +414,7 @@ async function begin(input: string): Promise<void> {
     onActivity: logAction,
     cache,
     allPaths: [...paths],
+    map: store,
     onRead: (path, from, to) => {
       pendingMark = { path, from, to, at: Date.now() };
     },
@@ -321,8 +448,11 @@ async function begin(input: string): Promise<void> {
 
   const client = new RealtimeClient({ apiKey: API_KEY });
 
+  // The prior map rides in with the brief, so a second session opens with
+  // "last time we covered…" instead of a tour of things already walked.
+  const priorMap = store.briefSection();
   const agent = client.agent({
-    instructions: instructions(brief),
+    instructions: instructions(priorMap === '' ? brief : `${brief}\n\n${priorMap}`),
     voice: VOICE,
     greeting: GREETING,
     modelOptions: { provider: 'gemini', includeThoughts: false },
@@ -385,8 +515,11 @@ async function begin(input: string): Promise<void> {
   // 'screen'` makes the transport publish it as a screen-share track rather
   // than a camera.
   //
-  // The default fps is about 1, tuned for a model glancing at a frame. This
-  // is meant to be watched back by a person, so it matches the Mac app's 5.
+  // 1 fps here too, and not the 5 it briefly was. There is no "record but
+  // don't show the model" mode: every published frame reaches the model and
+  // is billed, whatever it is also being kept for. A 13-minute session at
+  // 5 fps sent 4,063 frames — 783,618 image tokens, 35% of all input — and
+  // ended in an error. Smoother playback is not worth a session that dies.
   // Recording is the default, not a thing to opt into: the stream was already
   // requested at submit, and the button below only surfaces if that failed.
   // A browser will not hand over a screen without the user picking one, so the
@@ -401,7 +534,7 @@ async function begin(input: string): Promise<void> {
     // same moment as the room being ready to carry a track.
     void session
       .waitUntilReady()
-      .then(() => session.addVideoStream(stream, { kind: 'screen', fps: 5 }))
+      .then(() => session.addVideoStream(stream, { kind: 'screen', fps: 1 }))
       .then(() => {
         logAction('recording the screen');
       })

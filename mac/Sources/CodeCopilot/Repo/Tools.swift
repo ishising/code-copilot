@@ -36,6 +36,9 @@ public final class RepoTools {
     private let allPaths: [String]
     private let onActivity: @MainActor (String) -> Void
     private let onRoutes: @MainActor ([Route]) -> Void
+    /// The map the agent files each stop into. Optional only so tests can
+    /// build the tools without one; the app always passes it.
+    private let map: RepoMap?
 
     public init(
         ref: GitHub.Ref,
@@ -43,7 +46,8 @@ public final class RepoTools {
         cache: [String: String],
         allPaths: [String],
         onActivity: @escaping @MainActor (String) -> Void,
-        onRoutes: @escaping @MainActor ([Route]) -> Void = { _ in }
+        onRoutes: @escaping @MainActor ([Route]) -> Void = { _ in },
+        map: RepoMap? = nil
     ) {
         self.ref = ref
         self.overlay = overlay
@@ -51,6 +55,7 @@ public final class RepoTools {
         self.allPaths = allPaths
         self.onActivity = onActivity
         self.onRoutes = onRoutes
+        self.map = map
     }
 
     public func agentTools() throws -> [AgentTool] {
@@ -59,6 +64,8 @@ public final class RepoTools {
             try findInRepo(),
             try userFocus(),
             try offerRoutes(),
+            try addToMap(),
+            try mapSoFar(),
             // The SDK's own screen surface. `screenLocate` answers the capture
             // RPC the server-side locator drives; `screenHighlightElement`
             // renders what it found. No click tool: the user does the acting.
@@ -149,6 +156,134 @@ public final class RepoTools {
                         "The buttons are on their screen. Say they can pick one or just "
                             + "tell you what they want, then stop and wait."),
                 ]
+            }
+        }
+    }
+
+    // MARK: - the map
+
+    private struct AddToMapArgs: Decodable, Sendable {
+        let label: String
+        let kind: String?
+        let note: String
+        let path: String?
+        let from_line: Int?
+        let to_line: Int?
+        let connects_to: String?
+        let relationship: String?
+    }
+
+    private struct NoArgsAtAll: Decodable, Sendable {}
+
+    /// Filed at every stop, with the connection to an earlier one. This is the
+    /// structural enforcement of "nothing stands alone": a node cannot be
+    /// filed without saying what it connects to, and the reply pushes back
+    /// when it is not.
+    private func addToMap() throws -> AgentTool {
+        try AgentTool.define(
+            name: "add_to_map",
+            description:
+                "File the stop you just explained into the map the user can review "
+                + "later. Call this at EVERY stop, after marking. Give it the name you "
+                + "used out loud, one line on what it is for in the world's terms, where "
+                + "it lives, and — this is the important part — which earlier stop it "
+                + "connects to and how. Filing the same name again updates it and can add "
+                + "a new connection, so use it to link things too.",
+            input: .object(
+                properties: [
+                    "label": .string(
+                        description:
+                            "The name you used out loud, in their language. 'The front "
+                            + "desk', 'where the line opens' — not a class name."),
+                    "kind": .string(
+                        description:
+                            "One of: file, concept, layer, step. 'file' for a specific file "
+                            + "or lines, 'layer' for a whole part of the system, 'step' for "
+                            + "a moment in a flow, 'concept' for anything else."),
+                    "note": .string(
+                        description: "One line on what it does for the anchor. Plain words."),
+                    "path": .string(description: "File path, if it lives in one."),
+                    "from_line": .integer(description: "First line, if it lives in a file.", minimum: 1),
+                    "to_line": .integer(description: "Last line, if it lives in a file.", minimum: 1),
+                    "connects_to": .string(
+                        description:
+                            "The label of an EARLIER stop this one connects to. Required for "
+                            + "every stop after the first — the map is the connections."),
+                    "relationship": .string(
+                        description:
+                            "A short verb phrase for the arrow: 'sends you to', 'is inside', "
+                            + "'happens after', 'hides'."),
+                ],
+                required: ["label", "note"]
+            )
+        ) { (args: AddToMapArgs) in
+            await MainActor.run {
+                guard let map = self.map else {
+                    return ["added": .bool(false), "reason": .string("no map in this session")]
+                }
+                let label = args.label.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !label.isEmpty else {
+                    return ["added": .bool(false), "reason": .string("give the stop a label")]
+                }
+                let result = map.add(
+                    label: label,
+                    kind: args.kind.flatMap(RepoMap.Kind.init(rawValue:)),
+                    path: args.path,
+                    from: args.from_line,
+                    to: args.to_line,
+                    note: args.note,
+                    connectsTo: args.connects_to,
+                    relationship: args.relationship
+                )
+                let link = result.connectedTo.map { " ← \($0.label)" } ?? ""
+                self.onActivity("\(result.created ? "mapped" : "updated") \"\(result.node.label)\"\(link)")
+
+                var reply: [String: JSONValue] = [
+                    "added": .bool(true),
+                    "label": .string(result.node.label),
+                    "connected_to": result.connectedTo.map { .string($0.label) } ?? .null,
+                    "stops_on_map": .int(map.nodes.count),
+                ]
+                if let unknown = result.unknownConnection {
+                    reply["note"] = .string(
+                        "Nothing on the map is called \"\(unknown)\". Existing stops: "
+                            + map.nodes.map(\.label).joined(separator: ", ")
+                            + ". File it again with one of those as connects_to.")
+                } else if result.connectedTo == nil && map.nodes.count > 1 {
+                    reply["note"] = .string(
+                        "This stop is not connected to anything. Unless it truly stands "
+                            + "apart, file it again with connects_to set to an earlier stop.")
+                }
+                return reply
+            }
+        }
+    }
+
+    private func mapSoFar() throws -> AgentTool {
+        try AgentTool.define(
+            name: "map_so_far",
+            description:
+                "Read back the map: every stop filed so far, in order, with its "
+                + "connections. Use it for the recap every few stops, and whenever you "
+                + "are unsure what has already been covered.",
+            input: .object(properties: [:])
+        ) { (_: NoArgsAtAll) in
+            await MainActor.run {
+                guard let map = self.map, !map.isEmpty else {
+                    return ["stops": .array([]), "note": .string("nothing mapped yet")]
+                }
+                let stops: [JSONValue] = map.nodes.sorted { $0.order < $1.order }.map { node in
+                    let from: [JSONValue] = map.edges.filter { $0.to == node.id }.map { edge in
+                        let source = map.nodes.first { $0.id == edge.from }?.label ?? edge.from
+                        return .string(edge.label.map { "\(source) (\($0))" } ?? source)
+                    }
+                    return .object([
+                        "label": .string(node.label),
+                        "note": node.note.map { .string($0) } ?? .null,
+                        "connected_from": .array(from),
+                    ])
+                }
+                return ["stops": .array(stops), "count": .int(stops.count)]
             }
         }
     }

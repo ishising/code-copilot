@@ -133,6 +133,22 @@ an element lookup: exact, instant, and impossible to hallucinate.
 - `src/repo/tools.ts` — what the agent can do to that view.
 - `src/main.ts` — ingest, then session, then transcript.
 
+## The map
+
+A walk that is only spoken leaves nothing behind. So the agent files every stop
+into a map — the name it used out loud, one line on what the thing is for,
+where it lives, and **which earlier stop it connects to** — and the **Map** tab
+draws it as a flowchart as you go. Click a box to open that code.
+
+It is the structural enforcement of "nothing stands alone": a stop cannot be
+filed without saying what it connects to, and the agent is told about any that
+are not.
+
+The map persists per repository in the browser, so the next session opens with
+"last time we covered…" and carries on rather than starting over. **Export**
+writes it as Markdown with a Mermaid block — GitHub renders it — plus a table
+of every stop with exact file and lines.
+
 ## Known limits
 
 **Only public repos, unless you add a GitHub token.**

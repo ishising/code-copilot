@@ -101,6 +101,17 @@ The suite covers the parts that fail *silently*: the coordinate flip between
 accessibility's top-left origin and AppKit's bottom-left one, the brief
 builder, repo-reference parsing, and the accessibility filtering caps.
 
+## The map
+
+The agent files every stop into a map — the name it used out loud, one line on
+what it is for, where it lives, and **which earlier stop it connects to**. The
+panel shows the count; **Open map** writes it as Markdown with a Mermaid block
+(which GitHub and most editors render) and opens it. It persists per
+repository under `~/Library/Application Support/CodeCopilot/maps/`, so a
+second visit continues from where the last one stopped.
+
+This app draws no diagram of its own — the web app does, in its Map tab.
+
 ## Known limits
 
 **Chrome needs to be started with a flag.** It keeps its renderer

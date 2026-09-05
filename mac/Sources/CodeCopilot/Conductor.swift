@@ -1,3 +1,4 @@
+import AppKit
 import CosmoRealtime
 import Foundation
 import Observation
@@ -48,6 +49,10 @@ public final class Conductor {
     /// summary. Empty until then, and cleared the moment one is taken — they
     /// are an opening, not a permanent menu.
     public private(set) var routes: [Route] = []
+    /// The map for the current repository — restored from disk at ingest so a
+    /// second visit continues rather than starting over. Nil until a repo is
+    /// read.
+    public private(set) var map: RepoMap?
     public private(set) var problem: String?
 
     private var session: RealtimeSession?
@@ -77,6 +82,12 @@ public final class Conductor {
         activity = []
         routes = []
         phase = .reading("reading \(ref.owner)/\(ref.repo)…")
+
+        let map = RepoMap(key: RepoMap.key(for: ref))
+        self.map = map
+        if !map.isEmpty {
+            note("map restored: \(map.nodes.count) stops from an earlier session")
+        }
 
         do {
             let snapshot = try await GitHub.snapshot(ref)
@@ -116,9 +127,15 @@ public final class Conductor {
             cache: cache,
             allPaths: snapshot.entries.map(\.path),
             onActivity: { [weak self] line in self?.note(line) },
-            onRoutes: { [weak self] offered in self?.routes = offered }
+            onRoutes: { [weak self] offered in self?.routes = offered },
+            map: map
         )
         self.tools = tools
+
+        // The prior map rides in with the brief, so a second session opens with
+        // "last time we covered…" instead of a tour of things already walked.
+        let priorMap = map?.briefSection() ?? ""
+        let briefing = priorMap.isEmpty ? brief : "\(brief)\n\n\(priorMap)"
 
         // Prefer the key from the shared `.env`, and fall back to whatever
         // `cosmo login` stored. Zero-argument construction alone throws when
@@ -133,7 +150,7 @@ public final class Conductor {
             client = try RealtimeClient()
         }
         let agent = try client.agent(
-            instructions: Persona.instructions(brief: brief),
+            instructions: Persona.instructions(brief: briefing),
             voice: VoiceConfig(name: Persona.voice),
             // Noise cancellation is off unless asked for. Without it the mic
             // hears the agent's own voice coming out of the speakers, and the
@@ -250,6 +267,24 @@ public final class Conductor {
         } catch {
             problem = (error as? LocalizedError)?.errorDescription ?? "\(error)"
         }
+    }
+
+    /// Write the map as Markdown and open it in whatever reads Markdown here.
+    /// GitHub, and most editors, render the Mermaid block inside it.
+    public func openMap() {
+        guard let map, !map.isEmpty else { return }
+        do {
+            let url = try map.exportMarkdown()
+            NSWorkspace.shared.open(url)
+            note("exported the map to \(url.lastPathComponent)")
+        } catch {
+            problem = "could not write the map: \(error.localizedDescription)"
+        }
+    }
+
+    public func clearMap() {
+        map?.clear()
+        note("cleared the map")
     }
 
     private func note(_ line: String) {

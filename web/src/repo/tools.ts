@@ -14,6 +14,7 @@ import { tool } from 'cosmo-ai/tool';
 
 import type { RepoRef } from './github';
 import { fetchFile } from './github';
+import type { MapStore, NodeKind } from './map';
 import type { Viewer } from './viewer';
 
 /** A realtime model's working memory is small, so a file arrives in slices.
@@ -54,13 +55,16 @@ export type RepoToolsOptions = {
    *  summary and is the only thing here that knows which parts of *this*
    *  repository are worth an hour. */
   onRoutes?: (routes: Route[]) => void;
+  /** The map the agent files each stop into. Optional only so tests can build
+   *  the tools without one; the app always passes it. */
+  map?: MapStore;
 };
 
 /** One thing the agent offers to walk, rendered as a button. */
 export type Route = { label: string; summary: string };
 
 export function repoTools(options: RepoToolsOptions): RepoTools {
-  const { ref, viewer, onActivity, cache, allPaths, onRead, onRoutes } = options;
+  const { ref, viewer, onActivity, cache, allPaths, onRead, onRoutes, map } = options;
 
   async function textOf(path: string): Promise<string> {
     const hit = cache.get(path);
@@ -358,8 +362,134 @@ export function repoTools(options: RepoToolsOptions): RepoTools {
     },
   });
 
+  const addToMap = tool({
+    name: 'add_to_map',
+    description:
+      'File the stop you just explained into the map the user can see and ' +
+      'review later. Call this at EVERY stop, after highlighting. Give it the ' +
+      "name you used out loud, one line on what it is for in the world's " +
+      'terms, where it lives, and — this is the important part — which ' +
+      'earlier stop it connects to and how. Filing the same name again ' +
+      'updates it and can add a new connection, so use it to link things too.',
+    parameters: {
+      type: 'object',
+      properties: {
+        label: {
+          type: 'string',
+          maxLength: 60,
+          description:
+            "The name you used out loud, in their language. 'The front desk', " +
+            "'where the line opens' — not a class name.",
+        },
+        kind: {
+          type: 'string',
+          enum: ['file', 'concept', 'layer', 'step'],
+          description:
+            "'file' for a specific file or lines, 'layer' for a whole part of the " +
+            "system, 'step' for a moment in a flow, 'concept' for anything else.",
+        },
+        note: {
+          type: 'string',
+          maxLength: 140,
+          description: 'One line on what it does for the anchor. Plain words.',
+        },
+        path: { type: 'string', description: 'File path, if it lives in one.' },
+        from_line: { type: 'integer', minimum: 1 },
+        to_line: { type: 'integer', minimum: 1 },
+        connects_to: {
+          type: 'string',
+          description:
+            'The label of an EARLIER stop this one connects to. Required for ' +
+            'every stop after the first — the map is the connections.',
+        },
+        relationship: {
+          type: 'string',
+          maxLength: 40,
+          description:
+            "A short verb phrase for the arrow: 'sends you to', 'is inside', " +
+            "'happens after', 'hides'.",
+        },
+      },
+      required: ['label', 'note'],
+    },
+    handler: async (args) => {
+      if (map === undefined) return { added: false, reason: 'no map in this session' };
+      const label = String(args['label'] ?? '').trim();
+      if (label === '') return { added: false, reason: 'give the stop a label' };
+
+      const kind = args['kind'];
+      const input: Parameters<MapStore['add']>[0] = { label };
+      if (kind === 'file' || kind === 'concept' || kind === 'layer' || kind === 'step') {
+        input.kind = kind as NodeKind;
+      }
+      if (typeof args['note'] === 'string') input.note = args['note'];
+      if (typeof args['path'] === 'string' && args['path'] !== '') input.path = args['path'];
+      if (args['from_line'] !== undefined) input.from = Number(args['from_line']);
+      if (args['to_line'] !== undefined) input.to = Number(args['to_line']);
+      if (typeof args['connects_to'] === 'string') input.connectsTo = args['connects_to'];
+      if (typeof args['relationship'] === 'string') input.relationship = args['relationship'];
+
+      const result = map.add(input);
+      const connection =
+        result.connectedTo === null ? '' : ` ← ${result.connectedTo.label}`;
+      onActivity(`${result.created ? 'mapped' : 'updated'} "${result.node.label}"${connection}`);
+
+      const reply: Record<string, unknown> = {
+        added: true,
+        label: result.node.label,
+        connected_to: result.connectedTo?.label ?? null,
+        stops_on_map: map.nodes.length,
+      };
+      if (result.unknownConnection !== undefined) {
+        reply['note'] =
+          `Nothing on the map is called "${result.unknownConnection}". Existing stops: ` +
+          map.nodes.map((node) => node.label).join(', ') +
+          '. File it again with one of those as connects_to.';
+      } else if (result.connectedTo === null && map.nodes.length > 1) {
+        reply['note'] =
+          'This stop is not connected to anything. Unless it truly stands ' +
+          'apart, file it again with connects_to set to an earlier stop.';
+      }
+      return reply;
+    },
+  });
+
+  const mapSoFar = tool({
+    name: 'map_so_far',
+    description:
+      'Read back the map: every stop filed so far, in order, with its ' +
+      'connections. Use it for the recap every few stops, and whenever you ' +
+      'are unsure what has already been covered.',
+    parameters: { type: 'object', properties: {} },
+    handler: async () => {
+      if (map === undefined || map.isEmpty) return { stops: [], note: 'nothing mapped yet' };
+      const stops = [...map.nodes]
+        .sort((a, b) => a.order - b.order)
+        .map((node) => {
+          const inbound = map.edges.filter((edge) => edge.to === node.id);
+          const from = inbound.map((edge) => {
+            const source = map.nodes.find((other) => other.id === edge.from);
+            return edge.label === undefined
+              ? (source?.label ?? edge.from)
+              : `${source?.label ?? edge.from} (${edge.label})`;
+          });
+          return { label: node.label, note: node.note ?? null, connected_from: from };
+        });
+      return { stops, count: stops.length };
+    },
+  });
+
   return {
-    specs: [readFile, findInRepo, highlightLines, highlightPath, userFocus, offerRoutes],
+    specs: [
+      readFile,
+      findInRepo,
+      highlightLines,
+      highlightPath,
+      userFocus,
+      offerRoutes,
+      addToMap,
+      mapSoFar,
+    ],
     cache,
   };
 }

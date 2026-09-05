@@ -46,6 +46,11 @@ struct PanelView: View {
                 Divider()
             }
 
+            if let map = conductor.map, !map.isEmpty {
+                mapStrip(map)
+                Divider()
+            }
+
             transcript
         }
         .background(Color(nsColor: .windowBackgroundColor))
@@ -151,6 +156,27 @@ struct PanelView: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(12)
+    }
+
+    /// The map, as a count and two actions. This app draws no diagram of its
+    /// own; the export is Markdown with a Mermaid block, which GitHub and most
+    /// editors render, and it opens in whatever the user reads Markdown with.
+    private func mapStrip(_ map: RepoMap) -> some View {
+        HStack(spacing: 8) {
+            Text("MAP")
+                .font(.system(size: 9, weight: .semibold))
+                .foregroundStyle(.secondary)
+            Text("\(map.nodes.count) stops · \(map.edges.count) connections")
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundStyle(.secondary)
+            Spacer()
+            Button("Open map") { conductor.openMap() }
+                .controlSize(.small)
+            Button("Clear") { conductor.clearMap() }
+                .controlSize(.small)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
     }
 
     private var transcript: some View {
